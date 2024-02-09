@@ -68,14 +68,17 @@ fn sub_components(a: u32, b: u32, carry_in: u32) -> vec2<u32> {
 // no overflow checking for u256
 fn u256_add(a: u256, b: u256) -> u256 {
   var sum: u256;
-  sum.components = array<u32, 8>(0, 0, 0, 0, 0, 0, 0, 0);
+  var components = array<u32, 8>(0, 0, 0, 0, 0, 0, 0, 0);
+  var a_copy = a.components;
+  var b_copy = b.components;
   var carry: u32 = 0u;
 
   for (var i = 7i; i >= 0i; i--) {
-    let componentResult = add_components(a.components[i], b.components[i], carry);
-    sum.components[i] = componentResult[0];
+    let componentResult = add_components(a_copy[i], b_copy[i], carry);
+    components[i] = componentResult[0];
     carry = componentResult[1];
   }
+  sum.components = components;
 
   return sum;
 }
@@ -85,15 +88,19 @@ fn u256_rs1(a: u256) -> u256 {
     array<u32, 8>(0, 0, 0, 0, 0, 0, 0, 0)
   );
   var carry: u32 = 0u;
+  var a_copy = a.components;
+  var right_shifted_copy = right_shifted.components;
   for (var i = 0u; i < 8u; i++) {
-    var componentResult = a.components[i] >> 1u;
+    var componentResult = a_copy[i] >> 1u;
     componentResult = componentResult | carry;
-    right_shifted.components[i] = componentResult;
-    carry = a.components[i] << 31u;
+    right_shifted_copy[i] = componentResult;
+    carry = a_copy[i] << 31u;
   }
+  right_shifted.components = right_shifted_copy;
 
   return right_shifted;
 }
+
 
 fn is_even(a: u256) -> bool {
   return (a.components[7u] & 1u) == 0u;
@@ -107,16 +114,18 @@ fn is_odd_32_bits(a: u32) -> bool {
   return (a & 1u) == 1u;
 }
 
-// no underflow checking for u256
 fn u256_sub(a: u256, b: u256) -> u256 {
   var sub: u256;
-  sub.components = array<u32, 8>(0, 0, 0, 0, 0, 0, 0, 0);
+  var components = array<u32, 8>(0, 0, 0, 0, 0, 0, 0, 0);
+  var a_copy = a.components;
+  var b_copy = b.components;
   var carry: u32 = 0u;
   for (var i = 7i; i >= 0i; i--) {
-    let componentResult = sub_components(a.components[i], b.components[i], carry);
-    sub.components[i] = componentResult[0];
+    let componentResult = sub_components(a_copy[i], b_copy[i], carry);
+    components[i] = componentResult[0];
     carry = componentResult[1];
   }
+  sub.components = components;
 
   return sub;
 }
@@ -136,8 +145,10 @@ fn u256_subw(a: u256, b: u256) -> u256 {
 }
 
 fn equal(a: u256, b: u256) -> bool {
+  var a_copy = a.components;
+  var b_copy = b.components;
   for (var i = 0u; i < 8u; i++) {
-    if (a.components[i] != b.components[i]) {
+    if (a_copy[i] != b_copy[i]) {
       return false;
     }
   }
@@ -145,11 +156,12 @@ fn equal(a: u256, b: u256) -> bool {
   return true;
 }
 
-// returns whether a > b
 fn gt(a: u256, b: u256) -> bool {
+  var a_copy = a.components;
+  var b_copy = b.components;
   for (var i = 0u; i < 8u; i++) {
-    if (a.components[i] != b.components[i]) {
-      return a.components[i] > b.components[i];
+    if (a_copy[i] != b_copy[i]) {
+      return a_copy[i] > b_copy[i];
     }
   }
   // if a's components are never greater, than a is equal to b
@@ -158,9 +170,11 @@ fn gt(a: u256, b: u256) -> bool {
 
 // returns whether a >= b
 fn gte(a: u256, b: u256) -> bool {
+  var a_copy = a.components;
+  var b_copy = b.components;
   for (var i = 0u; i < 8u; i++) {
-    if (a.components[i] != b.components[i]) {
-      return a.components[i] > b.components[i];
+    if (a_copy[i] != b_copy[i]) {
+      return a_copy[i] > b_copy[i];
     }
   }
   // if none of the components are greater or smaller, a is equal to b
@@ -181,25 +195,18 @@ fn component_double(a: u32, carry: u32) -> vec2<u32> {
 }
 
 fn u256_double(a: u256) -> u256 {
-  var double: u256;
-  double.components = array<u32, 8>(0, 0, 0, 0, 0, 0, 0, 0);
+  var a_copy = a.components;
+  var components = array<u32, 8>(0, 0, 0, 0, 0, 0, 0, 0);
   var carry: u32 = 0u;
-
   for (var i = 7i; i >= 0i; i--) {
-    let componentResult = component_double(a.components[i], carry);
-    double.components[i] = componentResult[0];
+    let componentResult = component_double(a_copy[i], carry);
+    components[i] = componentResult[0];
     carry = componentResult[1];
   }
+  var double: u256;
+  double.components = components;
 
   return double;
-}
-
-fn component_right_shift(a: u32, shift: u32, carry: u32) -> vec2<u32> { 
-  var shifted: vec2<u32>;
-  shifted[0] = (a >> shift) + carry;
-  shifted[1] = a << (32u - shift);
-
-  return shifted;
 }
 
 fn u256_right_shift(a: u256, shift: u32) -> u256 {
@@ -208,14 +215,15 @@ fn u256_right_shift(a: u256, shift: u32) -> u256 {
     return U256_ZERO;
   }
 
-  var big_shift: u256 = u256(
-    array<u32, 8>(0, 0, 0, 0, 0, 0, 0, 0)
-  );
+  var big_shift_components = array<u32, 8>(0, 0, 0, 0, 0, 0, 0, 0);
+  var a_copy = a.components;
 
   // Shift out the components that need dropping
   for (var i = components_to_drop; i < 8u; i++) {
-    big_shift.components[i] = a.components[i-components_to_drop];
+    big_shift_components[i] = a_copy[i-components_to_drop];
   }
+  var big_shift: u256;
+  big_shift.components = big_shift_components;
 
   var shift_within_component = shift % 32u;
 
@@ -224,11 +232,13 @@ fn u256_right_shift(a: u256, shift: u32) -> u256 {
   }
 
   var carry: u32 = 0u;
+  big_shift_components = big_shift.components;
   for (var i = components_to_drop; i < 8u; i++) {
-    let componentResult = component_right_shift(big_shift.components[i], shift_within_component, carry);
-    big_shift.components[i] = componentResult[0];
+    let componentResult = component_right_shift(big_shift_components[i], shift_within_component, carry);
+    big_shift_components[i] = componentResult[0];
     carry = componentResult[1];
   }
+  big_shift.components = big_shift_components;
 
   return big_shift;
 }

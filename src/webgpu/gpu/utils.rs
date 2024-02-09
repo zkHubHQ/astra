@@ -203,8 +203,7 @@ pub fn strip_group_suffix(group: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use num_bigint::{BigInt, Sign};
-    use num_traits::Num;
+    use num_bigint::BigInt;
 
     // Helper function to convert string representations of big integers and arrays to their corresponding values.
     fn bigint_from_str(s: &str) -> BigInt {
