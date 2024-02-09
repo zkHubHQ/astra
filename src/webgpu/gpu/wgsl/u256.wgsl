@@ -209,6 +209,14 @@ fn u256_double(a: u256) -> u256 {
   return double;
 }
 
+fn component_right_shift(a: u32, shift: u32, carry: u32) -> vec2<u32> { 
+  var shifted: vec2<u32>;
+  shifted[0] = (a >> shift) + carry;
+  shifted[1] = a << (32u - shift);
+
+  return shifted;
+}
+
 fn u256_right_shift(a: u256, shift: u32) -> u256 {
   var components_to_drop = shift / 32u;
   if (components_to_drop >= 8u) {
