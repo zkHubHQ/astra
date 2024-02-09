@@ -1,7 +1,7 @@
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
-fn prune(shader_code: &str, function_names: &[&str]) -> String {
+pub fn prune(shader_code: &str, function_names: &[&str]) -> String {
     let mut shader_code = Regex::new(r"//.*|/\*[\s\S]*?\*/")
         .unwrap()
         .replace_all(shader_code, "")

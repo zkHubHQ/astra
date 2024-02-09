@@ -1,0 +1,4 @@
+mod curve_add_points_entry;
+mod curve_double_points_entry;
+mod curve_mul_points_entry;
+mod curve_mul_points_windowed_entry;
