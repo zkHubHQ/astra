@@ -96,4 +96,75 @@ mod tests {
         // Now, assert the result matches your expected value
         assert_eq!(big_int_result[0], BigInt::from(6)); // Example assertion, adjust as per your test case
     }
+
+    #[async_test]
+    async fn test_u256_mod_exp() {
+        let inputs = vec![
+            GpuU32Inputs {
+                u32_inputs: big_int_to_u32_array(&BigInt::from(2)),
+                individual_input_size: FIELD_SIZE as usize,
+            },
+            GpuU32Inputs {
+                u32_inputs: big_int_to_u32_array(&BigInt::from(4)),
+                individual_input_size: FIELD_SIZE as usize,
+            },
+        ];
+
+        let wgsl_function = "field_pow";
+        let curve = CurveType::BN254;
+
+        let result = field_entry(wgsl_function, curve, inputs, Some(2))
+            .await
+            .unwrap();
+
+        let big_int_result = u32_array_to_bigints(&result);
+
+        assert_eq!(big_int_result[0], BigInt::from(16));
+    }
+
+    #[async_test]
+    async fn test_u256_multiply() {
+        let inputs = vec![
+            GpuU32Inputs {
+                u32_inputs: big_int_to_u32_array(&BigInt::from(2)),
+                individual_input_size: FIELD_SIZE as usize,
+            },
+            GpuU32Inputs {
+                u32_inputs: big_int_to_u32_array(&BigInt::from(4)),
+                individual_input_size: FIELD_SIZE as usize,
+            },
+        ];
+
+        let wgsl_function = "field_multiply";
+        let curve = CurveType::BN254;
+
+        let result = field_entry(wgsl_function, curve, inputs, Some(2))
+            .await
+            .unwrap();
+
+        let big_int_result = u32_array_to_bigints(&result);
+
+        assert_eq!(big_int_result[0], BigInt::from(8));
+    }
+
+    #[async_test]
+    async fn test_u256_sqrt() {
+        let inputs = vec![
+            GpuU32Inputs {
+                u32_inputs: big_int_to_u32_array(&BigInt::from(81)),
+                individual_input_size: FIELD_SIZE as usize,
+            },
+        ];
+
+        let wgsl_function = "field_sqrt";
+        let curve = CurveType::BN254;
+
+        let result = field_entry(wgsl_function, curve, inputs, Some(2))
+            .await
+            .unwrap();
+
+        let big_int_result = u32_array_to_bigints(&result);
+
+        assert_eq!(big_int_result[0], BigInt::from(9));
+    }
 }

@@ -18,7 +18,7 @@ async fn u256_right_shift(
         fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {{
             var result = u256_right_shift(input1[global_id.x], {input2}u);
             output[global_id.x] = result;
-        }}"#
+        }}"#,
     );
 
     let shader_modules = [U256_WGSL, &shader_entry].join("\n\n");
@@ -46,7 +46,7 @@ mod tests {
             u32_inputs: big_int_to_u32_array(&BigInt::from(10)),
             individual_input_size: U256_SIZE as usize,
         };
-        let input2 = 1; // Shift amount
+        let input2 = 1; // The shift amount
 
         let result = u256_right_shift(input1, input2, Some(1)).await.unwrap();
         let big_int_result = u32_array_to_bigints(&result);
