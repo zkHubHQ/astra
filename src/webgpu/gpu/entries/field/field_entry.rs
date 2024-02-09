@@ -75,7 +75,7 @@ mod tests {
         ];
 
         let wgsl_function = "field_add"; // Adjust based on your actual WGSL function
-        let curve = CurveType::BLS12_377; // Example, adjust as per your curve
+        let curve = CurveType::BN254; // Example, adjust as per your curve
 
         let result = field_entry(wgsl_function, curve, inputs, Some(2))
             .await
