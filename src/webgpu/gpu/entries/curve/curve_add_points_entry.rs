@@ -66,25 +66,76 @@ async fn point_add(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::webgpu::gpu::utils::big_int_to_u32_array;
+    use crate::{
+        bn256::G1Affine,
+        serde::SerdeObject,
+        webgpu::gpu::{
+            u32_sizes::AFFINE_POINT_SIZE,
+            utils::{
+                big_int_to_u32_array, concatenate_vectors, convert_bn256_curve_to_u32_array,
+                convert_u32_array_to_bn256_curve, generate_random_affine_point,
+                generate_random_scalars,
+            },
+        },
+    };
+    use ff::{PrimeField, PrimeFieldBits};
+    use group::Curve;
     use num_bigint::BigInt;
+    use pasta_curves::arithmetic::CurveAffine;
     use tokio::test as async_test;
 
     #[async_test]
     #[ignore]
     async fn test_point_add() {
+        let input_affine_point1 = generate_random_affine_point::<G1Affine>();
+        let input_affine_point2 = generate_random_affine_point::<G1Affine>();
+        let expected_result = (input_affine_point1 + input_affine_point2).to_affine();
+
+        let point1_u32_array = convert_bn256_curve_to_u32_array(&input_affine_point1);
+        let point2_u32_array = convert_bn256_curve_to_u32_array(&input_affine_point2);
+
         let points_a = GpuU32Inputs {
-            u32_inputs: big_int_to_u32_array(&BigInt::from(123)),
-            individual_input_size: FIELD_SIZE as usize,
+            u32_inputs: concatenate_vectors(
+                &point1_u32_array.x_u32_array,
+                &point1_u32_array.y_u32_array,
+            ),
+            individual_input_size: AFFINE_POINT_SIZE as usize,
         };
         let points_b = GpuU32Inputs {
-            u32_inputs: big_int_to_u32_array(&BigInt::from(456)),
-            individual_input_size: FIELD_SIZE as usize,
+            u32_inputs: concatenate_vectors(
+                &point2_u32_array.x_u32_array,
+                &point2_u32_array.y_u32_array,
+            ),
+            individual_input_size: AFFINE_POINT_SIZE as usize,
         };
         let curve = CurveType::BN254;
 
-        let result = point_add(curve, points_a, points_b, Some(1)).await.unwrap();
-        let big_int_result = big_int_to_u32_array(&BigInt::from(579));
-        assert_eq!(result, big_int_result);
+        // Print the inputs
+        println!("points_a: {:?}", points_a);
+        println!("points_b: {:?}", points_b);
+
+        println!("Starting point_add");
+        let result_x = point_add(curve, points_a, points_b, Some(1)).await.unwrap();
+        println!("result_x: {:?}", result_x);
+
+        let mut x_bytes = [0u8; 32];
+        for (i, chunk) in result_x.iter().rev().enumerate() {
+            let chunk_bytes = &chunk.to_le_bytes();
+            x_bytes[i * 4..(i + 1) * 4].copy_from_slice(chunk_bytes);
+        }
+        let actual_x_result = crate::bn256::Fq::from_repr(x_bytes).unwrap();
+        assert_eq!(expected_result.x, actual_x_result);
+    }
+
+    #[async_test]
+    async fn test_create_point() {
+        let curve_affine_point = generate_random_affine_point::<G1Affine>();
+        println!("curve point: {:?}", curve_affine_point);
+
+        let curve_u32_array = convert_bn256_curve_to_u32_array(&curve_affine_point);
+        println!("curve point 1 as u32 array: {:?}", curve_u32_array);
+
+        let original_curve_point = convert_u32_array_to_bn256_curve(&curve_u32_array);
+        println!("original curve point: {:?}", original_curve_point);
     }
 }

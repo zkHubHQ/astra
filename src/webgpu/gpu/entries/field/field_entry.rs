@@ -62,9 +62,10 @@ async fn field_entry(
 
 #[cfg(test)]
 mod tests {
-    use crate::webgpu::gpu::utils::{big_int_to_u32_array, u32_array_to_bigints};
+    use crate::{bn256::G1Affine, webgpu::gpu::utils::{big_int_to_u32_array, convert_bn256_scalar_to_u32_array, convert_u32_array_to_bn256_scalar, generate_random_scalar_point, u32_array_to_bigints}};
 
     use super::*;
+    use group::prime::PrimeCurveAffine;
     use num_bigint::BigInt;
     use tokio::test as async_test; // Use this line if you're using Tokio. Otherwise, adjust according to your async runtime.
 
@@ -95,6 +96,39 @@ mod tests {
 
         // Now, assert the result matches your expected value
         assert_eq!(big_int_result[0], BigInt::from(6)); // Example assertion, adjust as per your test case
+    }
+
+    #[async_test]
+    async fn test_u256_add_actual_fields() {
+        let scalar_point1 = generate_random_scalar_point::<G1Affine>();
+        let scalar_point2 = generate_random_scalar_point::<G1Affine>();
+
+        let scalar_point1_u32_array = convert_bn256_scalar_to_u32_array(&scalar_point1);
+        let scalar_point2_u32_array = convert_bn256_scalar_to_u32_array(&scalar_point2);
+
+        let expected_result = scalar_point1 + scalar_point2;
+
+        let inputs = vec![
+            GpuU32Inputs {
+                u32_inputs: scalar_point1_u32_array.u32_array,
+                individual_input_size: FIELD_SIZE as usize,
+            },
+            GpuU32Inputs {
+                u32_inputs: scalar_point2_u32_array.u32_array,
+                individual_input_size: FIELD_SIZE as usize,
+            },
+        ];
+
+        let wgsl_function = "field_add";
+        let curve = CurveType::BN254;
+
+        let result = field_entry(wgsl_function, curve, inputs, Some(2))
+            .await
+            .unwrap();
+
+        let actual_result = convert_u32_array_to_bn256_scalar(&result);
+
+        assert_eq!(expected_result, actual_result);
     }
 
     #[async_test]

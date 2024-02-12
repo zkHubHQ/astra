@@ -1,6 +1,12 @@
+use ff::{Field, PrimeField};
+use group::{prime::PrimeCurveAffine, Curve, Group, GroupEncoding};
 use num_bigint::{BigInt, ToBigInt};
 use num_traits::{One, ToPrimitive, Zero};
+use pasta_curves::arithmetic::CurveAffine;
 use rand::Rng;
+use rand_core::OsRng;
+
+use crate::bn256::G1Affine;
 
 use super::curve_specific::{get_modulus, get_scalar_modulus, CurveType};
 
@@ -146,6 +152,118 @@ pub fn chunk_gpu_inputs(
     chunked_array
 }
 
+#[derive(Debug, Clone)]
+pub struct FieldU32Array {
+    // Implicitly stores the field inputs in a u32 array in the little endian format
+    pub u32_array: Vec<u32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CurveU32Array {
+    // Implicitly stores the curve inputs in a u32 array in the little endian format
+    pub x_u32_array: Vec<u32>,
+    pub y_u32_array: Vec<u32>,
+}
+
+// Returns the u32 array representation of a bn256 curve point in the big endian format
+pub fn convert_bn256_curve_to_u32_array(curve: &G1Affine) -> CurveU32Array {
+    let x_u32_array = curve
+        .x
+        .to_repr()
+        .chunks(4)
+        .rev() // Reverse the chunks to convert to big endian
+        .map(|chunk| {
+            let mut bytes = [0u8; 4];
+            bytes.copy_from_slice(chunk);
+            u32::from_le_bytes(bytes)
+        })
+        .collect();
+
+    let y_u32_array = curve
+        .y
+        .to_repr()
+        .chunks(4)
+        .rev() // Reverse the chunks to convert to big endian
+        .map(|chunk| {
+            let mut bytes = [0u8; 4];
+            bytes.copy_from_slice(chunk);
+            u32::from_le_bytes(bytes)
+        })
+        .collect();
+
+    CurveU32Array {
+        x_u32_array,
+        y_u32_array,
+    }
+}
+
+// Returns the u32 array representation of a bn256 scalar in the big endian format
+pub fn convert_bn256_scalar_to_u32_array(
+    scalar: &<G1Affine as PrimeCurveAffine>::Scalar,
+) -> FieldU32Array {
+    let u32_array = scalar
+        .to_repr()
+        .chunks(4)
+        .rev() // Reverse the chunks to convert to big endian
+        .map(|chunk| {
+            let mut bytes = [0u8; 4];
+            bytes.copy_from_slice(chunk);
+            u32::from_le_bytes(bytes)
+        })
+        .collect();
+
+    FieldU32Array { u32_array }
+}
+
+// Convert big endian u32 array to bn256 curve point
+pub fn convert_u32_array_to_bn256_curve(u32_array: &CurveU32Array) -> G1Affine {
+    let mut x_bytes = [0u8; 32];
+    for (i, chunk) in u32_array.x_u32_array.iter().rev().enumerate() {
+        let chunk_bytes = &chunk.to_le_bytes();
+        x_bytes[i * 4..(i + 1) * 4].copy_from_slice(chunk_bytes);
+    }
+    let x = crate::bn256::Fq::from_repr(x_bytes).unwrap();
+
+    let mut y_bytes = [0u8; 32];
+    for (i, chunk) in u32_array.y_u32_array.iter().rev().enumerate() {
+        let chunk_bytes = &chunk.to_le_bytes();
+        y_bytes[i * 4..(i + 1) * 4].copy_from_slice(chunk_bytes);
+    }
+    let y = crate::bn256::Fq::from_repr(y_bytes).unwrap();
+
+    G1Affine::from_xy(x, y).unwrap()
+}
+
+// Convert big endian u32 array to bn256 scalar
+pub fn convert_u32_array_to_bn256_scalar(
+    u32_array: &Vec<u32>,
+) -> <G1Affine as PrimeCurveAffine>::Scalar {
+    let mut bytes = [0u8; 32];
+    for (i, chunk) in u32_array.iter().rev().enumerate() {
+        let chunk_bytes = &chunk.to_le_bytes();
+        bytes[i * 4..(i + 1) * 4].copy_from_slice(chunk_bytes);
+    }
+    let scalar = crate::bn256::Fr::from_repr(bytes).unwrap();
+
+    scalar
+}
+
+pub fn generate_random_field(curve: CurveType) -> BigInt {
+    create_random_number(&get_modulus(curve))
+}
+
+pub fn generate_random_scalar(curve: CurveType) -> BigInt {
+    create_random_number(&get_scalar_modulus(curve))
+}
+
+pub fn generate_random_affine_point<C: CurveAffine>() -> C {
+    C::Curve::random(OsRng).to_affine()
+}
+
+pub fn generate_random_scalar_point<C: CurveAffine>() -> C::Scalar {
+    C::Scalar::random(OsRng)
+}
+
 // Function to generate random BigInts within a curve's field modulus
 pub fn generate_random_fields(input_size: usize, curve: CurveType) -> Vec<BigInt> {
     (0..input_size)
@@ -157,6 +275,13 @@ pub fn generate_random_scalars(input_size: usize, curve: CurveType) -> Vec<BigIn
     (0..input_size)
         .map(|_| create_random_number(&get_scalar_modulus(curve)))
         .collect()
+}
+
+pub fn concatenate_vectors(vec1: &Vec<u32>, vec2: &Vec<u32>) -> Vec<u32> {
+    let mut combined = Vec::with_capacity(vec1.len() + vec2.len());
+    combined.extend(vec1.iter().cloned());
+    combined.extend(vec2.iter().cloned());
+    combined
 }
 
 // Helper function to create a random BigInt number
