@@ -16,21 +16,21 @@ struct MulPointIntermediate {
   scalar: Field
 }
 
-fn mul_point_32_bit_scalar(p: Point, scalar: u32) -> Point {
-  var result: Point = ZERO_POINT;
-  var temp = p;
-  var scalar_iter = scalar;
-  while (!(scalar_iter == 0u)) {
-    if ((scalar_iter & 1u) == 1u) {
-      result = add_points(result, temp);
+fn mul_point_32_bit_scalar(base: Point, scalar: u32) -> Point {
+    var acc: Point = ZERO_POINT; // Start with the identity point
+    let tempScalar: u32 = scalar; // Temporary scalar for manipulation
+
+    // Iterate over each bit of the scalar from most significant to least significant
+    for (var i: u32 = 0; i < 32; i = i + 1) {
+        acc = double_point(acc); // Always double the accumulator
+
+        // Check if the current bit is set
+        if (((tempScalar >> (31 - i)) & 1u) != 0u) {
+            acc = add_points(acc, base); // Add the base point if the bit is set
+        }
     }
 
-    temp = double_point(temp);
-
-    scalar_iter = scalar_iter >> 1u;
-  }
-
-  return result;
+    return acc;
 }
 
 fn mul_point(p: Point, scalar: Field) -> Point {

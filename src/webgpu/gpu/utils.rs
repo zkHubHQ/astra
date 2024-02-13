@@ -6,7 +6,7 @@ use pasta_curves::arithmetic::CurveAffine;
 use rand::Rng;
 use rand_core::OsRng;
 
-use crate::bn256::G1Affine;
+use crate::{bn256::G1Affine, serde::SerdeObject};
 
 use super::curve_specific::{get_modulus, get_scalar_modulus, CurveType};
 
@@ -74,6 +74,15 @@ pub fn u32_array_to_bigints(u32_array: &[u32]) -> Vec<BigInt> {
 pub struct GpuU32Inputs {
     pub u32_inputs: Vec<u32>,
     pub individual_input_size: usize,
+}
+
+impl GpuU32Inputs {
+    pub fn new(u32_inputs: Vec<u32>, individual_input_size: usize) -> Self {
+        GpuU32Inputs {
+            u32_inputs,
+            individual_input_size,
+        }
+    }
 }
 
 pub fn gpu_u32_puppeteer_string(gpu_u32_input: &GpuU32Inputs) -> String {
@@ -215,6 +224,32 @@ pub fn convert_bn256_scalar_to_u32_array(
     FieldU32Array { u32_array }
 }
 
+pub fn convert_bn256_scalar_to_u16_array(
+    scalar: &<G1Affine as PrimeCurveAffine>::Scalar,
+) -> Vec<u16> {
+    let u16_array = scalar
+        .to_repr()
+        .chunks(2)
+        .rev() // Reverse the chunks to convert to big endian
+        .map(|chunk| {
+            let mut bytes = [0u8; 2];
+            bytes.copy_from_slice(chunk);
+            u16::from_le_bytes(bytes)
+        })
+        .collect();
+    return u16_array;
+}
+
+pub fn convert_bn_256_scalars_to_u16_array(
+    scalars: &Vec<<G1Affine as PrimeCurveAffine>::Scalar>,
+) -> Vec<u16> {
+    let mut u16_array = Vec::new();
+    for scalar in scalars {
+        u16_array.extend(convert_bn256_scalar_to_u16_array(scalar));
+    }
+    u16_array
+}
+
 // Convert big endian u32 array to bn256 curve point
 pub fn convert_u32_array_to_bn256_curve(u32_array: &CurveU32Array) -> G1Affine {
     let mut x_bytes = [0u8; 32];
@@ -246,6 +281,59 @@ pub fn convert_u32_array_to_bn256_scalar(
     let scalar = crate::bn256::Fr::from_repr(bytes).unwrap();
 
     scalar
+}
+
+// Convert bn256::Fq to u32 array in big endian format
+pub fn convert_bn256_fq_to_u32_array(fq: &crate::bn256::Fq) -> Vec<u32> {
+    let mut u32_array = Vec::new();
+    for chunk in fq.to_repr().chunks(4).rev() {
+        let mut bytes = [0u8; 4];
+        bytes.copy_from_slice(chunk);
+        u32_array.push(u32::from_le_bytes(bytes));
+    }
+    u32_array
+}
+
+// Convert u32 array in big endian format to bn256::Fq
+pub fn convert_u32_array_to_bn256_fq(u32_array: &Vec<u32>) -> crate::bn256::Fq {
+    let mut bytes = [0u8; 32];
+    for (i, chunk) in u32_array.iter().rev().enumerate() {
+        let chunk_bytes = &chunk.to_le_bytes();
+        bytes[i * 4..(i + 1) * 4].copy_from_slice(chunk_bytes);
+    }
+    let fq = crate::bn256::Fq::from_repr(bytes).unwrap();
+
+    fq
+}
+
+// Convert u32 array in big endian format to Vec<bn256::Fr>
+pub fn convert_u32_array_to_bn256_fq_vec(u32_array: &Vec<u32>) -> Vec<crate::bn256::Fq> {
+    u32_array
+        .chunks(8)
+        .map(|chunk| convert_u32_array_to_bn256_fq(&chunk.to_vec()))
+        .collect()
+}
+
+// Convert hex string to Fq
+pub fn convert_hex_string_to_bn256_fq(hex_string: &str) -> crate::bn256::Fq {
+    // remove 0x prefix
+    let hex_string = hex_string.trim_start_matches("0x");
+    let mut bytes = hex::decode(hex_string).unwrap();
+    let mut array = [0u8; 32];
+    bytes.reverse();
+    array.copy_from_slice(&bytes);
+    crate::bn256::Fq::from_repr(array).unwrap()
+}
+
+// Convert hex string to Fr
+pub fn convert_hex_string_to_bn256_fr(hex_string: &str) -> crate::bn256::Fr {
+    // remove 0x prefix
+    let hex_string = hex_string.trim_start_matches("0x");
+    let mut bytes = hex::decode(hex_string).unwrap();
+    let mut array = [0u8; 32];
+    bytes.reverse();
+    array.copy_from_slice(&bytes);
+    crate::bn256::Fr::from_repr(array).unwrap()
 }
 
 pub fn generate_random_field(curve: CurveType) -> BigInt {

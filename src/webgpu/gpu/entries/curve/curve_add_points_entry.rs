@@ -65,24 +65,26 @@ async fn point_add(
 
 #[cfg(test)]
 mod tests {
+    use std::{io::Read, ops::Mul};
+
     use super::*;
     use crate::{
-        bn256::G1Affine,
+        bn256::{self, Fr, G1Affine, G1},
         serde::SerdeObject,
         webgpu::gpu::{
             u32_sizes::AFFINE_POINT_SIZE,
             utils::{
-                big_int_to_u32_array, concatenate_vectors, convert_bn256_curve_to_u32_array,
-                convert_u32_array_to_bn256_curve, generate_random_affine_point,
-                generate_random_scalars,
+                big_int_to_u32_array, concatenate_vectors, convert_bn256_curve_to_u32_array, convert_hex_string_to_bn256_fq, convert_u32_array_to_bn256_curve, generate_random_affine_point, generate_random_scalar_point, generate_random_scalars
             },
         },
     };
-    use ff::{PrimeField, PrimeFieldBits};
-    use group::Curve;
+    use ff::{Field, PrimeField, PrimeFieldBits};
+    use group::{Curve, GroupEncoding};
     use num_bigint::BigInt;
-    use pasta_curves::arithmetic::CurveAffine;
+    use pasta_curves::arithmetic::{CurveAffine, CurveExt};
+    use rayon::array;
     use tokio::test as async_test;
+    use group::prime::PrimeCurveAffine;
 
     #[async_test]
     #[ignore]
