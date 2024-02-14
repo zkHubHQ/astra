@@ -110,7 +110,7 @@ pub async fn pippenger_msm(
     for chunk in gpu_results_as_fq_vec.chunks(4) {
         let (projective_x, projective_y, _projective_t, projective_z) =
             (chunk[0], chunk[1], chunk[2], chunk[3]);
-        let z_inverse = projective_z.invert().unwrap();
+        let z_inverse = projective_z.invert().unwrap_or(Fq::zero());
         let x = projective_x * z_inverse;
         let y = projective_y * z_inverse;
         let extended_point = bn256::G1Affine::from_xy(x, y).unwrap().to_curve();
@@ -188,15 +188,19 @@ mod tests {
     use super::*;
     use crate::{
         bn256::G1Affine,
-        webgpu::gpu::utils::{
-            convert_bn_256_scalars_to_u16_array, convert_hex_string_to_bn256_fq,
-            convert_hex_string_to_bn256_fr,
+        msm::{best_multiexp, small_multiexp},
+        webgpu::{
+            gpu::utils::{
+                convert_bn_256_scalars_to_u16_array, convert_hex_string_to_bn256_fq,
+                convert_hex_string_to_bn256_fr,
+            },
+            utils::input_generator::point_scalar_generator,
         },
     };
     use tokio::test as async_test; // Adjust according to your async runtime if not using Tokio.
 
     #[async_test]
-    async fn test_pippenger_msm() {
+    async fn test_pippenger_msm_single_input() {
         // let point = generate_random_affine_point::<G1Affine>().to_curve();
         // let scalar = generate_random_scalar_point::<G1Affine>();
         let fq_x = convert_hex_string_to_bn256_fq(
@@ -225,5 +229,52 @@ mod tests {
                 "MSM result did not match the expected value"
             );
         }
+    }
+
+    #[async_test]
+    async fn test_pippenger_msm_multiple_inputs() {
+        // time taken for input generation
+        let start = std::time::Instant::now();
+        let point_scalar_inputs = point_scalar_generator::<G1Affine>(1000000);
+        println!("Time taken for input generation: {:?}", start.elapsed());
+
+        // time taken for input preprocessing
+        let start = std::time::Instant::now();
+        let affine_points: Vec<G1Affine> = point_scalar_inputs.iter().map(|x| x.point).collect();
+        let points: Vec<G1> = point_scalar_inputs
+            .iter()
+            .map(|x| x.point.to_curve())
+            .collect();
+        let scalars: Vec<Fr> = point_scalar_inputs.iter().map(|x| x.scalar).collect();
+        println!("Time taken for input preprocessing: {:?}", start.elapsed());
+
+        // Measure time taken for small CPU multiexp
+        let start = std::time::Instant::now();
+        let expected_result =
+            small_multiexp::<G1Affine>(scalars.as_slice(), affine_points.as_slice());
+        println!("Time taken for small CPU multiexp: {:?}", start.elapsed());
+
+        // Measure time taken for best CPU multiexp
+        let start = std::time::Instant::now();
+        let best_cpu_result = best_multiexp::<G1Affine>(scalars.as_slice(), affine_points.as_slice());
+        println!("Time taken for best CPU multiexp: {:?}", start.elapsed());
+
+        assert_eq!(
+            expected_result, best_cpu_result,
+            "Small multiexp result did not match the best multiexp result");
+
+        // Perform pippenger_msm
+        // measure time taken
+        let start = std::time::Instant::now();
+        let actual_result = pippenger_msm(points, convert_bn_256_scalars_to_u16_array(&scalars))
+            .await
+            .expect("MSM computation failed");
+        println!("Time taken for pippenger_msm: {:?}", start.elapsed());
+
+        println!("Expected result: {:?}", expected_result);
+        println!("Actual result: {:?}", actual_result);
+        assert_eq!(
+            actual_result, expected_result,
+            "MSM result did not match the expected value");
     }
 }

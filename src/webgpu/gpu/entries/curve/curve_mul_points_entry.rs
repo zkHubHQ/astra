@@ -149,6 +149,29 @@ mod tests {
         println!("Small multiexp: {:?}", small_mul);
     }
 
+    #[async_test]
+    async fn test_fun() {
+        let fq_x = convert_hex_string_to_bn256_fq(
+            "0x0d015c9f3dbc23ea97c59aca583a74d7bb8ba2bf6dc73d1a251cca6facd58fd3",
+        );
+        let fq_y = convert_hex_string_to_bn256_fq(
+            "0x20bbc60135d38427f0f805fdf9ba60f0916fda28e470d4f93fe5ae9f005e222a",
+        );
+        let scalar = convert_hex_string_to_bn256_fr(
+            "0x2272d81bf65542f08b87009f78424a384d057929d5b305b1509f7595b9a499db",
+        );
+        let point = G1Affine::from_xy(fq_x, fq_y).unwrap().to_curve();
+        println!("Point: {:?}", point);
+        println!("Scalar: {:?}", scalar);
+        let expected_result = point.mul(scalar);
+
+        println!("Expected result: {:?}", expected_result);
+
+        // print affine point
+        let affine_point = point.to_affine();
+        println!("Affine point: {:?}", affine_point);
+    }
+
     pub fn small_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
         let coeffs: Vec<_> = coeffs.iter().map(|a| a.to_repr()).collect();
         let mut acc = C::Curve::identity();
