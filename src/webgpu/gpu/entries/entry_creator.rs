@@ -7,7 +7,7 @@ use wgpu::{
 use crate::webgpu::gpu::utils::{chunk_gpu_inputs, GpuU32Inputs};
 // use futures::executor::block_on;
 
-async fn get_device() -> Result<(Device, Queue), Box<dyn std::error::Error>> {
+pub async fn get_device() -> Result<(Device, Queue), Box<dyn std::error::Error>> {
     let instance = wgpu::Instance::default();
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions::default())
@@ -175,7 +175,7 @@ fn submit_compute_pass(
 }
 
 // Function to read data from a buffer
-async fn read_buffer(
+pub async fn read_buffer(
     device: &Device,
     gpu_read_buffer: &Buffer,
 ) -> Result<Vec<u32>, Box<dyn std::error::Error>> {

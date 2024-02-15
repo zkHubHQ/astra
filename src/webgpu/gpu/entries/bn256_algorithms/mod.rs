@@ -1,1 +1,2 @@
 mod pippenger_msm_entry;
+mod ntt_multipass_entry;

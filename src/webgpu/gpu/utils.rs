@@ -224,6 +224,22 @@ pub fn convert_bn256_scalar_to_u32_array(
     FieldU32Array { u32_array }
 }
 
+// Convert hex string to u32 array in big endian format
+pub fn convert_hex_string_to_u32_array(hex_string: &str) -> Vec<u32> {
+    // remove 0x prefix
+    let hex_string = hex_string.trim_start_matches("0x");
+    let mut bytes = hex::decode(hex_string).unwrap();
+    bytes.reverse();
+    let mut u32_array = Vec::new();
+    for chunk in bytes.chunks(4) {
+        let mut chunk_bytes = [0u8; 4];
+        chunk_bytes.copy_from_slice(chunk);
+        u32_array.push(u32::from_le_bytes(chunk_bytes));
+    }
+    u32_array.reverse();
+    u32_array
+}
+
 pub fn convert_bn256_scalar_to_u16_array(
     scalar: &<G1Affine as PrimeCurveAffine>::Scalar,
 ) -> Vec<u16> {
@@ -248,6 +264,16 @@ pub fn convert_bn_256_scalars_to_u16_array(
         u16_array.extend(convert_bn256_scalar_to_u16_array(scalar));
     }
     u16_array
+}
+
+pub fn convert_bn_256_scalars_to_u32_array(
+    scalars: &Vec<<G1Affine as PrimeCurveAffine>::Scalar>,
+) -> Vec<u32> {
+    let mut u32_array = Vec::new();
+    for scalar in scalars {
+        u32_array.extend(convert_bn256_scalar_to_u32_array(scalar).u32_array);
+    }
+    u32_array
 }
 
 // Convert big endian u32 array to bn256 curve point
@@ -306,11 +332,19 @@ pub fn convert_u32_array_to_bn256_fq(u32_array: &Vec<u32>) -> crate::bn256::Fq {
     fq
 }
 
-// Convert u32 array in big endian format to Vec<bn256::Fr>
+// Convert u32 array in big endian format to Vec<bn256::Fq>
 pub fn convert_u32_array_to_bn256_fq_vec(u32_array: &Vec<u32>) -> Vec<crate::bn256::Fq> {
     u32_array
         .chunks(8)
         .map(|chunk| convert_u32_array_to_bn256_fq(&chunk.to_vec()))
+        .collect()
+}
+
+// Convert u32 array in big endian format to Vec<bn256::Fr>
+pub fn convert_u32_array_to_bn256_fr_vec(u32_array: &Vec<u32>) -> Vec<crate::bn256::Fr> {
+    u32_array
+        .chunks(8)
+        .map(|chunk| convert_u32_array_to_bn256_scalar(&chunk.to_vec()))
         .collect()
 }
 

@@ -33,7 +33,9 @@ async fn field_entry(
     );
 
     let shader_entry = format!(
-        r#"{input_bindings}{output_bindings}
+        r#"
+        {input_bindings}
+        {output_bindings}
         @compute @workgroup_size(64)
         fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {{
             var result = {wgsl_function}({args});
@@ -62,7 +64,13 @@ async fn field_entry(
 
 #[cfg(test)]
 mod tests {
-    use crate::{bn256::G1Affine, webgpu::gpu::utils::{big_int_to_u32_array, convert_bn256_scalar_to_u32_array, convert_u32_array_to_bn256_scalar, generate_random_scalar_point, u32_array_to_bigints}};
+    use crate::{
+        bn256::G1Affine,
+        webgpu::gpu::utils::{
+            big_int_to_u32_array, convert_bn256_scalar_to_u32_array,
+            convert_u32_array_to_bn256_scalar, generate_random_scalar_point, u32_array_to_bigints,
+        },
+    };
 
     use super::*;
     use group::prime::PrimeCurveAffine;
@@ -183,12 +191,10 @@ mod tests {
 
     #[async_test]
     async fn test_u256_sqrt() {
-        let inputs = vec![
-            GpuU32Inputs {
-                u32_inputs: big_int_to_u32_array(&BigInt::from(81)),
-                individual_input_size: FIELD_SIZE as usize,
-            },
-        ];
+        let inputs = vec![GpuU32Inputs {
+            u32_inputs: big_int_to_u32_array(&BigInt::from(81)),
+            individual_input_size: FIELD_SIZE as usize,
+        }];
 
         let wgsl_function = "field_sqrt";
         let curve = CurveType::BN254;
