@@ -215,7 +215,6 @@ pub async fn ntt_multipass(
                 });
             compute_pass.set_pipeline(&wn_pipeline);
             compute_pass.set_bind_group(0, &wn_bind_group, &[]);
-            println!("Dispatching workgroups: {}", (2usize.pow(i as u32) + 63 / 64 as usize) as u32);
             compute_pass.dispatch_workgroups(
                 (2usize.pow(i as u32) + 63 / 64 as usize) as u32, // 64 is the workgroup size
                 1,
@@ -321,6 +320,30 @@ pub async fn ntt_multipass(
     Ok(output_data)
 }
 
+fn bit_reverse(polynomial_coefficients: &Vec<Fr>) -> Vec<Fr> {
+    let mut polynomial_coefficients_mut = polynomial_coefficients.clone();
+    let n = polynomial_coefficients_mut.len();
+    let log_n = (n as f64).log2() as usize;
+
+    let reverse_bits = |num: usize, bits: usize| -> usize {
+        let mut num_mut = num;
+        let mut reversed = 0;
+        for _i in 0..bits {
+            reversed = (reversed << 1) | (num_mut & 1);
+            num_mut >>= 1;
+        }
+        reversed
+    };
+
+    for i in 0..n {
+        let rev = reverse_bits(i, log_n);
+        if i < rev {
+            polynomial_coefficients_mut.swap(i, rev);
+        }
+    }
+    polynomial_coefficients_mut
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::SystemTime;
@@ -339,20 +362,18 @@ mod tests {
 
     #[async_test]
     async fn test_ntt_multipass_basic() {
-        let mut polynomial_coeff_fr = vec![
-            Fr::from(0),
-            Fr::from(1),
-            Fr::from(0),
-            Fr::from(0),
-        ];
+        let mut polynomial_coeff_fr = vec![Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4)];
         let polynomial_length = polynomial_coeff_fr.len();
+
+        // Create gpu input polynomial, which is the polynomial_coeff_fr in the reverse order
+        let polynomial_coeff_fr_reverse: Vec<Fr> = bit_reverse(&polynomial_coeff_fr);
+
         let polynomial_coeff_vec =
-            convert_bn_256_scalars_to_u32_array(&polynomial_coeff_fr.clone());
-        println!("Polynomial coefficients: {:?}", polynomial_coeff_vec);
+            convert_bn_256_scalars_to_u32_array(&polynomial_coeff_fr_reverse);
+
         let individual_input_size = 8;
         let omega = convert_hex_string_to_bn256_fr(
             "0x30644e72e131a029048b6e193fd841045cea24f6fd736bec231204708f703636",
-            // "0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
         );
 
         // Expected result using best_fft
@@ -393,7 +414,8 @@ mod tests {
         let result_fr: Vec<Fr> = convert_u32_array_to_bn256_fr_vec(&result);
 
         println!("Actual result: {:?}", result_fr);
-        // Add your assertions here
+
+        assert_eq!(result_fr, polynomial_coeff_fr);
     }
 
     fn generate_data(k: u32) -> Vec<Fr> {
@@ -415,9 +437,13 @@ mod tests {
         let mut polynomial_coeff_fr = generate_data(k);
 
         let polynomial_length = polynomial_coeff_fr.len();
+
+        // Create gpu input polynomial, which is the polynomial_coeff_fr in the reverse order
+        let polynomial_coeff_fr_reverse: Vec<Fr> = bit_reverse(&polynomial_coeff_fr);
+
         let polynomial_coeff_vec =
-            convert_bn_256_scalars_to_u32_array(&polynomial_coeff_fr.clone());
-        println!("Polynomial coefficients: {:?}", polynomial_coeff_vec);
+            convert_bn_256_scalars_to_u32_array(&polynomial_coeff_fr_reverse);
+
         let individual_input_size = 8;
         let omega: Fr = convert_hex_string_to_bn256_fr(
             "0x21082ca216cbbf4e1c6e4f4594dd508c996dfbe1174efb98b11509c6e306460b",
@@ -456,6 +482,14 @@ mod tests {
         let result_fr: Vec<Fr> = convert_u32_array_to_bn256_fr_vec(&result);
 
         println!("Actual result: {:?}", result_fr);
-        // Add your assertions here
+
+        assert_eq!(result_fr, polynomial_coeff_fr);
     }
 }
+
+/*
+TODO:
+- Adjust the workgroup sizes
+- Generate the list of roots of unity
+- Create a similar input API like best_fft
+*/
