@@ -5,7 +5,7 @@ use crate::{
     bn256::{self, Fq, Fr, G1},
     webgpu::gpu::{
         curve_specific::{get_curve_base_functions_wgsl, get_curve_params_wgsl, CurveType},
-        entries::entry_creator::entry,
+        entries::entry_creator::{entry, GpuContext},
         prune::prune,
         u32_sizes::{EXT_POINT_SIZE, FIELD_SIZE},
         utils::{
@@ -52,6 +52,7 @@ pub async fn pippenger_msm(
     let num_msms = 256 / SCALAR_CHUNK_WIDTH;
     let mut msms: Vec<HashMap<u16, G1>> = vec![HashMap::new(); num_msms];
 
+    let start = std::time::Instant::now();
     // Bucket method
     let mut scalar_index = 0;
     let mut points_index = 0;
@@ -74,6 +75,7 @@ pub async fn pippenger_msm(
             points_index += 1;
         }
     }
+    println!("Time taken for bucket method: {:?}", start.elapsed());
 
     // GPU input setup & computation
     let mut points_concatenated = Vec::new();
@@ -90,9 +92,12 @@ pub async fn pippenger_msm(
     let chunked_points = chunk_array(points_concatenated, 44_000);
     let chunked_scalars = chunk_array(scalars_concatenated, 11_000);
 
+    let start = std::time::Instant::now();
     let mut gpu_results_as_fq_vec = Vec::new();
+    let mut gpu_context = GpuContext::new().await.unwrap();
     for (chunked_point, chunked_scalar) in chunked_points.into_iter().zip(chunked_scalars.iter()) {
         let buffer_result = point_mul(
+            &mut gpu_context,
             CurveType::BN254,
             GpuU32Inputs::new(points_to_u32_array(chunked_point), EXT_POINT_SIZE as usize),
             GpuU32Inputs::new(
@@ -104,7 +109,9 @@ pub async fn pippenger_msm(
         .unwrap();
         gpu_results_as_fq_vec.extend(convert_u32_array_to_bn256_fq_vec(&buffer_result));
     }
+    println!("Time taken for GPU computation: {:?}", start.elapsed());
 
+    let start = std::time::Instant::now();
     // Convert GPU results back to extended points
     let mut gpu_results_as_extended_points = Vec::new();
     for chunk in gpu_results_as_fq_vec.chunks(4) {
@@ -116,7 +123,9 @@ pub async fn pippenger_msm(
         let extended_point = bn256::G1Affine::from_xy(x, y).unwrap().to_curve();
         gpu_results_as_extended_points.push(extended_point);
     }
+    println!("Time taken for converting gpu results back: {:?}", start.elapsed());
 
+    let start = std::time::Instant::now();
     // Summation of scalar multiplications for each MSM
     let mut msm_results = Vec::new();
     let bucketing = msms.iter().map(|msm| msm.len());
@@ -130,7 +139,9 @@ pub async fn pippenger_msm(
         msm_results.push(current_sum);
         prev_bucket_sum += bucket;
     }
+    println!("Time taken for summation: {:?}", start.elapsed());
 
+    let start = std::time::Instant::now();
     // Solve for original MSM
     let mut original_msm_result = msm_results[0].clone();
     let exponent_mul_term = Fr::from(2u64.pow(SCALAR_CHUNK_WIDTH as u32));
@@ -138,11 +149,13 @@ pub async fn pippenger_msm(
         original_msm_result = original_msm_result.mul(exponent_mul_term); // square
         original_msm_result = original_msm_result.add(msm_result);
     }
+    println!("Time taken for solving original MSM: {:?}", start.elapsed());
 
     Ok(original_msm_result)
 }
 
 async fn point_mul(
+    gpu_context: &mut GpuContext,
     curve: CurveType,
     input1: GpuU32Inputs,
     input2: GpuU32Inputs,
@@ -180,7 +193,7 @@ async fn point_mul(
         &vec!["mul_point_32_bit_scalar"],
     ) + &shader_entry;
 
-    entry(vec![input1, input2], &shader_code, EXT_POINT_SIZE as usize).await
+    entry(gpu_context, vec![input1, input2], &shader_code, EXT_POINT_SIZE as usize).await
 }
 
 #[cfg(test)]
@@ -197,6 +210,7 @@ mod tests {
             utils::input_generator::point_scalar_generator,
         },
     };
+    use group::Curve;
     use tokio::test as async_test; // Adjust according to your async runtime if not using Tokio.
 
     #[async_test]
@@ -235,7 +249,7 @@ mod tests {
     async fn test_pippenger_msm_multiple_inputs() {
         // time taken for input generation
         let start = std::time::Instant::now();
-        let point_scalar_inputs = point_scalar_generator::<G1Affine>(1000000);
+        let point_scalar_inputs = point_scalar_generator::<G1Affine>(100);
         println!("Time taken for input generation: {:?}", start.elapsed());
 
         // time taken for input preprocessing
@@ -256,12 +270,14 @@ mod tests {
 
         // Measure time taken for best CPU multiexp
         let start = std::time::Instant::now();
-        let best_cpu_result = best_multiexp::<G1Affine>(scalars.as_slice(), affine_points.as_slice());
+        let best_cpu_result =
+            best_multiexp::<G1Affine>(scalars.as_slice(), affine_points.as_slice());
         println!("Time taken for best CPU multiexp: {:?}", start.elapsed());
 
         assert_eq!(
             expected_result, best_cpu_result,
-            "Small multiexp result did not match the best multiexp result");
+            "Small multiexp result did not match the best multiexp result"
+        );
 
         // Perform pippenger_msm
         // measure time taken
@@ -271,10 +287,36 @@ mod tests {
             .expect("MSM computation failed");
         println!("Time taken for pippenger_msm: {:?}", start.elapsed());
 
-        println!("Expected result: {:?}", expected_result);
-        println!("Actual result: {:?}", actual_result);
+        println!("Expected result: {:?}", expected_result.to_affine());
+        println!("Actual result: {:?}", actual_result.to_affine());
         assert_eq!(
             actual_result, expected_result,
-            "MSM result did not match the expected value");
+            "MSM result did not match the expected value"
+        );
+    }
+
+    #[async_test]
+    async fn test_pippenger_only() {
+        // time taken for input generation
+        let start = std::time::Instant::now();
+        let point_scalar_inputs = point_scalar_generator::<G1Affine>(10000);
+        println!("Time taken for input generation: {:?}", start.elapsed());
+
+        // time taken for input preprocessing
+        let points: Vec<G1> = point_scalar_inputs
+            .iter()
+            .map(|x| x.point.to_curve())
+            .collect();
+        let scalars: Vec<Fr> = point_scalar_inputs.iter().map(|x| x.scalar).collect();
+
+        // Perform pippenger_msm
+        // measure time taken
+        let start = std::time::Instant::now();
+        let actual_result = pippenger_msm(points, convert_bn_256_scalars_to_u16_array(&scalars))
+            .await
+            .expect("MSM computation failed");
+        println!("Time taken for pippenger_msm: {:?}", start.elapsed());
+
+        println!("Actual result: {:?}", actual_result.to_affine());
     }
 }

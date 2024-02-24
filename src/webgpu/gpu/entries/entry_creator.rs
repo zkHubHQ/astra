@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use wgpu::util::DeviceExt;
 use wgpu::{
     Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, ComputePassDescriptor,
@@ -6,6 +8,48 @@ use wgpu::{
 
 use crate::webgpu::gpu::utils::{chunk_gpu_inputs, GpuU32Inputs};
 // use futures::executor::block_on;
+
+struct PipelineCache {
+    cache: HashMap<usize, wgpu::ComputePipeline>,
+}
+
+impl PipelineCache {
+    fn new() -> Self {
+        Self {
+            cache: HashMap::new(),
+        }
+    }
+
+    fn get_or_create_pipeline(
+        &mut self,
+        device: &Device,
+        shader_module: &ShaderModule,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        input_size: usize,
+    ) -> &wgpu::ComputePipeline {
+        self.cache
+            .entry(input_size)
+            .or_insert_with(|| setup_compute_pipeline(device, shader_module, bind_group_layout))
+    }
+}
+
+pub struct GpuContext {
+    device: Device,
+    queue: Queue,
+    pipeline_cache: PipelineCache,
+}
+
+impl GpuContext {
+    pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        let (device, queue) = get_device().await?;
+        let pipeline_cache = PipelineCache::new();
+        Ok(Self {
+            device,
+            queue,
+            pipeline_cache,
+        })
+    }
+}
 
 pub async fn get_device() -> Result<(Device, Queue), Box<dyn std::error::Error>> {
     let instance = wgpu::Instance::default();
@@ -120,12 +164,13 @@ fn setup_compute_pipeline(
         push_constant_ranges: &[],
     });
 
-    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+    let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("Compute Pipeline"),
         layout: Some(&compute_pipeline_layout),
         module: shader_module,
         entry_point: "main",
-    })
+    });
+    compute_pipeline
 }
 
 // Function to submit compute pass
@@ -182,7 +227,9 @@ pub async fn read_buffer(
     let buffer_slice = gpu_read_buffer.slice(..);
     let (sender, receiver) = flume::bounded(1);
     buffer_slice.map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
+    let start = std::time::Instant::now();
     device.poll(wgpu::Maintain::wait()).panic_on_timeout();
+    println!("Time to map buffer: {:?}", start.elapsed());
     receiver.recv_async().await.unwrap().unwrap();
     let data = buffer_slice.get_mapped_range();
     let result: Vec<u32> = bytemuck::cast_slice(&data).to_vec();
@@ -211,9 +258,10 @@ pub async fn batched_entry(
     };
 
     let mut output_result = Vec::with_capacity(total_expected_outputs * u32_size_per_output);
+    let mut gpu_context = GpuContext::new().await?;
 
     for chunk in chunked_inputs {
-        let batch_result = entry(chunk, shader_code, u32_size_per_output).await?;
+        let batch_result = entry(&mut gpu_context, chunk, shader_code, u32_size_per_output).await?;
         output_result.extend(batch_result);
     }
 
@@ -221,11 +269,13 @@ pub async fn batched_entry(
 }
 
 pub async fn entry(
+    gpu_context: &mut GpuContext,
     input_data: Vec<GpuU32Inputs>,
     shader_code: &str,
     u32_size_per_output: usize,
 ) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
-    let (device, queue) = get_device().await?;
+    let device = &gpu_context.device;
+    let queue = &gpu_context.queue;
     let shader_module = create_shader_module(&device, shader_code);
     let num_inputs = input_data[0].u32_inputs.len() / input_data[0].individual_input_size;
     let result_buffer_size =
@@ -239,7 +289,14 @@ pub async fn entry(
 
     let (bind_group_layout, bind_group) =
         setup_bind_group(&device, &gpu_buffer_inputs, &result_buffer);
-    let compute_pipeline = setup_compute_pipeline(&device, &shader_module, &bind_group_layout);
+    let start = std::time::Instant::now();
+    let compute_pipeline = gpu_context.pipeline_cache.get_or_create_pipeline(
+        &device,
+        &shader_module,
+        &bind_group_layout,
+        input_data[0].individual_input_size,
+    );
+    println!("Time to get or create pipeline: {:?}", start.elapsed());
 
     let gpu_read_buffer = submit_compute_pass(
         &device,
@@ -253,6 +310,7 @@ pub async fn entry(
 
     // Map the result buffer to read its contents
     let output_data = read_buffer(&device, &gpu_read_buffer).await?;
+    println!("\n\n");
 
     Ok(output_data)
 }
