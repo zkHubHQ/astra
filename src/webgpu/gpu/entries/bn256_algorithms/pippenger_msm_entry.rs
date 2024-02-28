@@ -1,18 +1,16 @@
-use group::{prime::PrimeCurveAffine, Group};
-use pasta_curves::arithmetic::CurveAffine;
+use group::Group;
 
 use crate::{
     bn256::{self, Fq, Fr, G1},
     webgpu::gpu::{
-        curve_specific::{get_curve_base_functions_wgsl, get_curve_params_wgsl, CurveType},
+        curve_specific::{
+            get_ugly_curve_base_functions_wgsl, get_ugly_curve_params_wgsl, CurveType,
+        },
         entries::entry_creator::{entry, GpuContext},
         prune::prune,
         u32_sizes::{EXT_POINT_SIZE, FIELD_SIZE},
-        utils::{
-            convert_bn256_fq_to_u32_array, convert_bn256_scalar_to_u32_array,
-            convert_u32_array_to_bn256_fq_vec, GpuU32Inputs,
-        },
-        wgsl::{CURVE_WGSL, FIELD_MODULUS_WGSL, U256_WGSL},
+        utils::{convert_bn256_fq_to_u32_array, convert_u32_array_to_bn256_fq_vec, GpuU32Inputs},
+        wgsl::{UGLY_CURVE_WGSL, UGLY_FIELD_MODULUS_WGSL, UGLY_U256_WGSL},
     },
 };
 use std::{
@@ -117,13 +115,13 @@ pub async fn pippenger_msm(
     for chunk in gpu_results_as_fq_vec.chunks(4) {
         let (projective_x, projective_y, _projective_t, projective_z) =
             (chunk[0], chunk[1], chunk[2], chunk[3]);
-        let z_inverse = projective_z.invert().unwrap_or(Fq::zero());
-        let x = projective_x * z_inverse;
-        let y = projective_y * z_inverse;
-        let extended_point = bn256::G1Affine::from_xy(x, y).unwrap().to_curve();
+        let extended_point = bn256::G1::from_xyz(projective_x, projective_y, projective_z).unwrap();
         gpu_results_as_extended_points.push(extended_point);
     }
-    println!("Time taken for converting gpu results back: {:?}", start.elapsed());
+    println!(
+        "Time taken for converting gpu results back: {:?}",
+        start.elapsed()
+    );
 
     let start = std::time::Instant::now();
     // Summation of scalar multiplications for each MSM
@@ -162,12 +160,12 @@ async fn point_mul(
 ) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
     let shader_entry = format!(
         r#"
-        const ZERO_POINT = Point (U256_ZERO, U256_ONE, U256_ZERO, U256_ZERO);
-        const ZERO_AFFINE = AffinePoint (U256_ZERO, U256_ONE);
+        const ZERO_POINT = UglyPoint (U256_ZERO, U256_ONE, U256_ZERO, U256_ZERO);
+        const ZERO_AFFINE = UglyAffinePoint (U256_ZERO, U256_ONE);
 
-        @group(0) @binding(0) var<storage, read> input1: array<Point>;
+        @group(0) @binding(0) var<storage, read> input1: array<UglyPoint>;
         @group(0) @binding(1) var<storage, read> input2: array<u32>;
-        @group(0) @binding(2) var<storage, read_write> output: array<Point>;
+        @group(0) @binding(2) var<storage, read_write> output: array<UglyPoint>;
 
         @compute @workgroup_size(64)
         fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {{
@@ -183,17 +181,23 @@ async fn point_mul(
 
     let shader_code = prune(
         &vec![
-            U256_WGSL,
-            &get_curve_params_wgsl(curve),
-            FIELD_MODULUS_WGSL,
-            CURVE_WGSL,
-            &get_curve_base_functions_wgsl(curve),
+            UGLY_U256_WGSL,
+            &get_ugly_curve_params_wgsl(curve),
+            UGLY_FIELD_MODULUS_WGSL,
+            UGLY_CURVE_WGSL,
+            &get_ugly_curve_base_functions_wgsl(curve),
         ]
         .join("\n"),
         &vec!["mul_point_32_bit_scalar"],
     ) + &shader_entry;
 
-    entry(gpu_context, vec![input1, input2], &shader_code, EXT_POINT_SIZE as usize).await
+    entry(
+        gpu_context,
+        vec![input1, input2],
+        &shader_code,
+        EXT_POINT_SIZE as usize,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -202,6 +206,7 @@ mod tests {
     use crate::{
         bn256::G1Affine,
         msm::{best_multiexp, small_multiexp},
+        serde::SerdeObject,
         webgpu::{
             gpu::utils::{
                 convert_bn_256_scalars_to_u16_array, convert_hex_string_to_bn256_fq,
@@ -210,7 +215,9 @@ mod tests {
             utils::input_generator::point_scalar_generator,
         },
     };
-    use group::Curve;
+    use ff::{Field, PrimeField};
+    use group::{prime::PrimeCurveAffine, Curve, GroupEncoding};
+    use pasta_curves::arithmetic::{CurveAffine, CurveExt};
     use tokio::test as async_test; // Adjust according to your async runtime if not using Tokio.
 
     #[async_test]
@@ -299,7 +306,7 @@ mod tests {
     async fn test_pippenger_only() {
         // time taken for input generation
         let start = std::time::Instant::now();
-        let point_scalar_inputs = point_scalar_generator::<G1Affine>(10000);
+        let point_scalar_inputs = point_scalar_generator::<G1Affine>(100);
         println!("Time taken for input generation: {:?}", start.elapsed());
 
         // time taken for input preprocessing
@@ -308,6 +315,10 @@ mod tests {
             .map(|x| x.point.to_curve())
             .collect();
         let scalars: Vec<Fr> = point_scalar_inputs.iter().map(|x| x.scalar).collect();
+
+        // print out the points and scalars
+        println!("Points: {:?}", points);
+        println!("Scalars: {:?}", scalars);
 
         // Perform pippenger_msm
         // measure time taken
@@ -318,5 +329,41 @@ mod tests {
         println!("Time taken for pippenger_msm: {:?}", start.elapsed());
 
         println!("Actual result: {:?}", actual_result.to_affine());
+    }
+
+    #[test]
+    fn test_point_serde() {
+        let rng = &mut rand::thread_rng();
+        let random_point = G1::random(rng);
+        let rng = &mut rand::thread_rng();
+        let random_scalar = Fr::random(rng);
+        let mul_point = random_point.mul(random_scalar);
+        println!("Mul point: {:?}", mul_point);
+
+        // to bytes
+        println!("Mul point to raw bytes: {:?}", mul_point.to_raw_bytes());
+
+        // print to_repr
+        println!("Mul point x to repr: {:?}", mul_point.x.to_repr());
+        println!("Mul point y to repr: {:?}", mul_point.y.to_bytes());
+        println!("Mul point z to repr: {:?}", mul_point.z.to_bytes());
+
+        // hex encoded
+        println!(
+            "Mul point x to hex: {:?}",
+            hex::encode(mul_point.x.to_bytes())
+        );
+        println!(
+            "Mul point y to hex: {:?}",
+            hex::encode(mul_point.y.to_bytes())
+        );
+        println!(
+            "Mul point z to hex: {:?}",
+            hex::encode(mul_point.z.to_bytes())
+        );
+
+        let point_from_coordinates = G1::from_xyz(mul_point.x, mul_point.y, mul_point.z).unwrap();
+
+        println!("Point from coordinates: {:?}", point_from_coordinates);
     }
 }

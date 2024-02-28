@@ -399,6 +399,15 @@ macro_rules! new_curve_impl {
                     input * $name::curve_constant_3b()
                 }
             }
+
+            pub fn from_xyz(x: $base, y: $base, z: $base) -> CtOption<Self> {
+                let p = $name {
+                    x,
+                    y,
+                    z,
+                };
+                CtOption::new(p, p.is_on_curve())
+            }
         }
 
         impl $name_affine {
